@@ -1,3 +1,5 @@
+import numpy as np 
+
 def generate_local_volatility_surface(S, strikes, T, r, model='constant', params=None):
     """Generate local volatility for given strikes based on the specified model."""
     sigma_surface = []
