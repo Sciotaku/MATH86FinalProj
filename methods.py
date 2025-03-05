@@ -42,11 +42,11 @@ class Backward_Methods(ABC):
     pass
 
 class Isakov(Backward_Methods):
-  def get_density(strikes, prices):
+  def get_density(strikes, prices, time_to_expiry, R, D,):
     pass
 
 class Butterfly(Backward_Methods):
-  def get_density(strikes, prices):
+  def get_density(strikes, prices, time_to_expiry, R, D,):
     butterfly_prices = {}
     for i in range(1,len(strikes)-1):
       # Get components of the butterfly spread
@@ -59,6 +59,7 @@ class Butterfly(Backward_Methods):
 
         butterfly_price = left + right - (2 * middle)
         butterfly_prices[strike] = butterfly_price
+    # TODO: Set a standardized return thing: dictionary, pandas df?
     return butterfly_prices
   
   def butterfly_2(strikes, prices):
@@ -68,9 +69,22 @@ class Butterfly(Backward_Methods):
     return butterfly_prices
     
 class Breeden_Litzenberger(Backward_Methods):
-  def get_density(strikes, prices):
-    pass
+  def get_density(strikes, prices, time_to_expiry, R, D=0,):
+    tau = time_to_expiry     # Time to maturity (years)
+    r = R - D                # Annual risk-free rate - the dividend yeild
+
+    h = strikes[1] - strikes[0]  # Step size for finite differences
+    prices = pd.DataFrame({"strike": strikes, "price": prices})
+
+    # Second derivative approximation using central finite differences
+    prices['curvature'] = (-2 * prices['price'] + prices['price'].shift(1) + prices['price'].shift(-1)) / h**2
+
+    # Apply the Breeden-Litzenberger formula
+    prices['risk_neutral_pdf'] = np.exp(r * tau) * prices['curvature']
+
+    # TODO: Set a standardized return thing: dictionary, pandas df?
+    return prices
 
 class Implied_Vol(Backward_Methods):
-  def get_density(strikes, prices):
+  def get_density(strikes, prices, time_to_expiry, R, D,):
     return super().get_density(prices)
