@@ -8,6 +8,7 @@ from scipy.interpolate import interp1d
 from scipy.sparse import diags
 from scipy.sparse.linalg import spsolve
 
+
 def fokker_planck(vol_arr, time_to_expiry, r, num_steps=50, ):
   K_vals = vol_arr[0, :]  # Extract the first row from the 2D array vol_arr
   sigma_K = vol_arr[1, :] # Extract the 2nd row from the 2D array vol_arr
@@ -58,10 +59,7 @@ def fokker_planck(vol_arr, time_to_expiry, r, num_steps=50, ):
   # Normalize final probability distribution
   pdf /= np.sum(pdf * dS)
 
-'''
-Standardized inputs:
-    - 
-'''
+
 class Forward_Method(ABC):
   @abstractmethod
   def get_option_prices():
@@ -82,8 +80,8 @@ class Black_Scholes(Forward_Method):
     return call
 
 class Local_Black_Scholes(Forward_Method):
-  def get_option_prices(self, S0, K, T, r, sigma_func, strike_range,):
-    return self.black_scholes_local_vol(S0, K, T, r, sigma_func, strike_range,)
+  def get_option_prices(self, S0, T, r, sigma_func, strike_range,):
+    return self.black_scholes_local_vol(S0, T, r, sigma_func, strike_range,)
 
   ###### Claude's attempt: #######
   def black_scholes_local_vol(self, S0, T, r, local_vol, strike_range=[0,301], option_type='call', 
