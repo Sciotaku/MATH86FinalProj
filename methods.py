@@ -80,7 +80,7 @@ class Black_Scholes(Forward_Method):
     return call
 
 class Local_Black_Scholes(Forward_Method):
-  def get_option_prices(self, S0, T, r, sigma_func, strike_range,):
+  def get_option_prices(self, S0, T, r, sigma_func, strike_range=[0,301],):
     return self.black_scholes_local_vol(S0, T, r, sigma_func, strike_range,)
 
   ###### Claude's attempt: #######
