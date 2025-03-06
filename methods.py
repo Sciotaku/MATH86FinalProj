@@ -32,12 +32,15 @@ class Black_Scholes(Forward_Method):
 
 class Local_Black_Scholes(Forward_Method):
   def get_option_prices(self, S0, K, T, r, sigma_func,):
-    return self.chatgpt_price(S0, K, T, r, sigma_func,)
+    return self.black_scholes_local_vol(S0, K, T, r, sigma_func,)
 
   ###### Claude's attempt: #######
-  # def black_scholes_local_vol(S0, T, r, local_vol, option_type='call', 
-  #                          num_S_steps=100, num_t_steps=100):
-  #    for k in range(300):
+  def black_scholes_local_vol(self, S0, T, r, local_vol, option_type='call', 
+                           num_S_steps=100, num_t_steps=100):
+    result = []
+    for K in range(300):
+      result.append(self.black_scholes_local_vol(S0, K, T, r, local_vol, option_type='call', num_S_steps=100, num_t_steps=100))
+    return result
         
 
   def black_scholes_local_vol(S0, K, T, r, local_vol, option_type='call', 
