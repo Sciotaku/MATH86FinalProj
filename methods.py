@@ -18,9 +18,7 @@ def fokker_planck(vol_arr, time_to_expiry, r, num_steps=50, ):
   # TODO: Check if this is the right way to do it
   local_vol_func = interp1d(K_vals, sigma_K, kind="cubic", fill_value="extrapolate")
 
-  # -------------------------------
   # 2. Define Fokker–Planck Parameters
-  # -------------------------------
   S_min, S_max = min(K_vals) // 25 , max(K_vals) * 25  # Asset price range
   N_S = 100  # Number of asset price grid points
   S_vals = np.linspace(S_min, S_max, N_S)  # Discretized price grid
@@ -67,8 +65,8 @@ class Forward_Method(ABC):
 
 
 class Black_Scholes(Forward_Method):
-  def get_options_prices(self, S, K, r, T, sigma):
-    return self.try_1(S, K, r, T, sigma)
+  def get_options_prices(S, K, r, T, sigma):
+    return Black_Scholes.try_1(S, K, r, T, sigma)
 
   def try_1(S, K, r, T, sigma):
     """
@@ -80,15 +78,15 @@ class Black_Scholes(Forward_Method):
     return call
 
 class Local_Black_Scholes(Forward_Method):
-  def get_option_prices(self, S0, T, r, sigma_func, strike_range=[0,301],):
-    return self.black_scholes_local_vol(S0, T, r, sigma_func, strike_range,)
+  def get_option_prices(S0, T, r, sigma_func, strike_range=[0,301],):
+    return Local_Black_Scholes.black_scholes_local_vol(S0, T, r, sigma_func, strike_range,)
 
   ###### Claude's attempt: #######
-  def black_scholes_local_vol(self, S0, T, r, local_vol, strike_range=[0,301], option_type='call', 
+  def black_scholes_local_vol(S0, T, r, local_vol, strike_range=[0,301], option_type='call', 
                            num_S_steps=100, num_t_steps=100):
     result = []
     for K in range(strike_range[0], strike_range[1]):
-      result.append(self.black_scholes_local_vol(S0, K, T, r, local_vol, option_type='call', num_S_steps=100, num_t_steps=100))
+      result.append(Local_Black_Scholes.black_scholes_local_vol(S0, K, T, r, local_vol, option_type, num_S_steps, num_t_steps))
     return result
         
 
@@ -261,10 +259,10 @@ class Local_Black_Scholes(Forward_Method):
     return price_at_S0, S_grid, V_t0
   
   ########### Deepseek's Attempt: ###########
-  def deepseek_algo(self, S0, T, r, sigma_func, strike_range=[0,301],):
+  def deepseek_algo(S0, T, r, sigma_func, strike_range=[0,301],):
     result = []
     for K in range(strike_range[0], strike_range[1]):
-      result.append(self.black_scholes_price_dependent_vol(S0, K, T, r, sigma_func,))
+      result.append(Local_Black_Scholes.black_scholes_price_dependent_vol(S0, K, T, r, sigma_func,))
     return result
 
   def thomas_algorithm(a, b, c, d):
@@ -301,7 +299,7 @@ class Local_Black_Scholes(Forward_Method):
     
     return x
 
-  def black_scholes_price_dependent_vol(self, S0, K, T, r, sigma_func, Ns=200, Nt=1000, Smax=None, option_type='call'):
+  def black_scholes_price_dependent_vol(S0, K, T, r, sigma_func, Ns=200, Nt=1000, Smax=None, option_type='call'):
       if Smax is None:
           Smax = 2 * K
       Smin = 0
@@ -355,7 +353,7 @@ class Local_Black_Scholes(Forward_Method):
           rhs[-1] += 0.5 * dt * c[Ns-2] * V[-1]
           
           # Solve tridiagonal system
-          V_interior = self.thomas_algorithm(lower_diag, main_diag, upper_diag, rhs)
+          V_interior = Local_Black_Scholes.thomas_algorithm(lower_diag, main_diag, upper_diag, rhs)
           V[1:-1] = V_interior
       
       # Interpolate to S0
