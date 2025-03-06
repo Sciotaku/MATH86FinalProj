@@ -93,7 +93,7 @@ class Local_Black_Scholes(Forward_Method):
     return result
         
   @staticmethod
-  def black_scholes_local_vol(S0, K, T, r, local_vol, option_type='call', 
+  def black_scholes_local_vol(S0, K, r, T, local_vol, option_type='call', 
                            num_S_steps=100, num_t_steps=100):
     """
     Black-Scholes with price-dependent volatility using finite difference method
@@ -160,7 +160,7 @@ class Local_Black_Scholes(Forward_Method):
     return option_price
   
   ######### ChatGPT's attempt #########
-  def chatgpt_price(S0, K, T, r, sigma_func, S_max=None, M=200, N=200, option_type="call"):
+  def chatgpt_price(S0, K, r, T, sigma_func, S_max=None, M=200, N=200, option_type="call"):
     """
     Price a European call or put option under the Black-Scholes model 
     with price-dependent volatility using a finite difference method (Crank-Nicolson).
