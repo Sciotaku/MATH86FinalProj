@@ -65,9 +65,11 @@ class Forward_Method(ABC):
 
 
 class Black_Scholes(Forward_Method):
+  @staticmethod
   def get_options_prices(S, K, r, T, sigma):
     return Black_Scholes.try_1(S, K, r, T, sigma)
 
+  @staticmethod
   def try_1(S, K, r, T, sigma):
     """
     Black-Scholes formula for a European call option.
@@ -78,18 +80,19 @@ class Black_Scholes(Forward_Method):
     return call
 
 class Local_Black_Scholes(Forward_Method):
+  @staticmethod
   def get_option_prices(S0, T, r, sigma_func, strike_range=[0,301],):
-    return Local_Black_Scholes.black_scholes_local_vol(S0, T, r, sigma_func, strike_range,)
+    return Local_Black_Scholes.bs_loop(S0, T, r, sigma_func, strike_range,)
 
   ###### Claude's attempt: #######
-  def black_scholes_local_vol(S0, T, r, local_vol, strike_range=[0,301], option_type='call', 
-                           num_S_steps=100, num_t_steps=100):
+  @staticmethod
+  def bs_loop(S0, T, r, local_vol, strike_range=[0,301], option_type='call', num_S_steps=100, num_t_steps=100):
     result = []
     for K in range(strike_range[0], strike_range[1]):
       result.append(Local_Black_Scholes.black_scholes_local_vol(S0, K, T, r, local_vol, option_type, num_S_steps, num_t_steps))
     return result
         
-
+  @staticmethod
   def black_scholes_local_vol(S0, K, T, r, local_vol, option_type='call', 
                            num_S_steps=100, num_t_steps=100):
     """
