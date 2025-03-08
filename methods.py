@@ -9,91 +9,274 @@ from scipy.sparse import diags
 from scipy.sparse.linalg import spsolve
 
 
-def fokker_planck(vol_arr, time_to_expiry, r, num_steps=50, ):
-  K_vals = vol_arr[0, :]  # Extract the first row from the 2D array vol_arr
-  sigma_K = vol_arr[1, :] # Extract the 2nd row from the 2D array vol_arr
-  # Fix negative values before interpolation
-  sigma_K = np.clip(sigma_K, 0)
-  # Interpolate sigma(K) to be used for all asset prices S
-  # TODO: Check if this is the right way to do it
-  local_vol_func = interp1d(K_vals, sigma_K, kind="cubic", fill_value="extrapolate")
+#--------------------------------------------------#
+'''
+(vol ---> option prices)
+Forward Methods:
 
-  # 2. Define Fokker–Planck Parameters
-  S_min, S_max = min(K_vals) // 25 , max(K_vals) * 25  # Asset price range
-  N_S = 100  # Number of asset price grid points
-  S_vals = np.linspace(S_min, S_max, N_S)  # Discretized price grid
-  dS = S_vals[1] - S_vals[0]  # Step size in asset price space
+  get_option_price(
+    Inputs:
+      - S0: stock price (float)
+      - K: strike price (float)
+      - r: yearly interest rate (float)
+          (5% interest --> R=0.05)
+      - d: yearly dividend yield/rate (float)
+          (2% yearly dividend yield --> d=0.02))
+      - T: time to expiry (float)
+          (in fraction of years, so 25 trading days ---> T=25/252)
+      - sigma: volatility (float || pd.Series)
+    ): --> 
+    Output: options price (float)
+  (Note: get_options_price only returns one options price for a given strike, thus to get a list of "market prices" at different strikes, the function must be called several times)
 
-  T = time_to_expiry
-  N_T = num_steps  # Number of time steps
-  dt = T / N_T  # Time step size
-
-  # 3. Construct Crank–Nicholson Matrices
-  sigma_vals = local_vol_func(S_vals)  # Compute sigma(S) at each grid point
-  # Ensure all vol values remain above zero
-  sigma_vals = np.clip(sigma_vals, 0)
-
-  alpha = (r / 2) * S_vals / dS  # Drift term
-  beta = (sigma_vals**2 * S_vals**2) / (2 * dS**2)  # Diffusion term
-
-  A_diag = -beta - alpha / 2
-  B_diag = -beta + alpha / 2
-  C_diag = 2 * beta + 1 / dt
-  D_diag = -2 * beta + 1 / dt
-
-  # Create sparse matrices
-  A = diags([A_diag[1:], C_diag, B_diag[:-1]], [-1, 0, 1], format="csr")  # Left matrix
-  B = diags([-A_diag[1:], D_diag, -B_diag[:-1]], [-1, 0, 1], format="csr")  # Right matrix
-
-  # 4. Initialize Probability Distribution
-  pdf = np.exp(-((S_vals - 4050) ** 2) / (2 * 200 ** 2))  # Gaussian initial guess
-  pdf /= np.sum(pdf * dS)  # Normalize to ensure total probability is 1
-
-  # 5. Solve the Fokker–Planck PDE Using Crank–Nicholson
-  for _ in range(N_T):
-      b = B @ pdf  # Compute right-hand side
-      pdf = spsolve(A, b)  # Solve linear system
-
-  # Normalize final probability distribution
-  pdf /= np.sum(pdf * dS)
-
-
+  fokker_plank(
+    Inputs:
+      - S0: initial stock price (float)
+      - r: yearly interest rate (float)
+          (5% interest --> R=0.05)
+      - d: yearly dividend yield/rate (float)
+          (2% yearly dividend yield --> d=0.02))
+      - T: time to expiry (float)
+          (in fraction of years, so 25 trading days ---> T=25/252)
+      - sigma: local volatility (pd.Series)
+          (function of price)
+      - (optional) NS: number of spatial steps
+      - (optional) S_max_factor: the max geometric increase of the stock in the calculated pdf
+      - (optional) NT: number of time steps
+      - (optional) upwind: If True, use an upwind discretization for the drift term (recommended when mu > 0)
+  ): -->
+  Output: 
+'''
 class Forward_Method(ABC):
   @abstractmethod
-  def get_option_prices():
+  def get_option_price(S0: float, K: float, r: float, d: float, T: float, sigma: float | pd.Series) -> float:
     pass
+  
+  # TODO: Impliment
+  @abstractmethod
+  def fokker_planck(
+      S0: float,
+      r: float,      # constant interest rate parameter
+      d: float,      # constant dividend yield parameter
+      T: float,       # total time (in years)
+      sigma,         # function: sigma(S) -> float, or array-like/pd.Series of volatilities
+      NS: int = 400,  # number of spatial steps
+      S_max_factor: float = 5.0,  # domain up to S_max_factor * S0
+      NT: int = 400,  # number of time steps
+      upwind: bool = True  # Currently, the drift is implemented using an upwind scheme (assumed mu > 0)
+  ):
+      """
+      Solve the 1D Fokker–Planck PDE:
+      
+          dp/dt = 0.5 * d^2/dS^2 [ sigma^2(S)*S^2 * p ] - d/dS [ mu*S * p ]
+      
+      for S in [0, S_max] and t in [0, T] using a Crank–Nicolson scheme.
+      
+      The initial condition is a discrete delta at S = S0 and Dirichlet boundary conditions
+      (p(t,0)=0, p(t,S_max)=0) are enforced.
+      
+      Parameters
+      ----------
+      S0 : float
+          Initial stock price.
+      r : float
+          Constant interest rate.
+      d : float
+          Constant dividend yield.
+      T : float
+          Total time (years).
+      sigma : callable or array-like or pd.Series
+          Either a function sigma(S) or a discrete series of local volatilities.
+          If not callable, the code will interpolate the provided series.
+      NS : int, optional
+          Number of spatial grid intervals (default: 400).
+      S_max_factor : float, optional
+          Domain is [0, S_max_factor * S0] (default: 5.0).
+      NT : int, optional
+          Number of time steps (default: 400).
+      upwind : bool, optional
+          Currently the drift term is discretized in an upwind manner (recommended for mu>0).
+      
+      Returns
+      -------
+      pd.Series
+          A Pandas Series where the index is the S_grid and the values are the probability density p(T,S).
+      """
+      
+      # Create an interpolation function for sigma if sigma is not callable.
+      if callable(sigma):
+          sigma_func = sigma
+      else:
+          # If input is array-like or a pd.Series, build an interpolation.
+          if isinstance(sigma, pd.Series):
+              S_vals = sigma.index.astype(float).values
+              sigma_vals = sigma.values.astype(float)
+          else:
+              sigma_vals = np.array(sigma).astype(float)
+              # Assume that the array covers [0, S_max] with length N_sigma.
+              N_sigma = len(sigma_vals)
+              S_vals = np.linspace(0.0, S_max_factor * S0, N_sigma)
+          sigma_func = lambda S: np.interp(S, S_vals, sigma_vals)
+      
+      # Define spatial grid.
+      S_max = S_max_factor * S0
+      S_grid = np.linspace(0.0, S_max, NS + 1)
+      dS = S_grid[1] - S_grid[0]
+      
+      # Time step and drift component.
+      dt = T / NT
+      mu = r - d  # risk-neutral drift
+      
+      # Initialize probability density: use a discrete delta at S0.
+      p_now = np.zeros(NS + 1)
+      p_next = np.zeros(NS + 1)
+      i0 = np.argmin(np.abs(S_grid - S0))
+      p_now[i0] = 1.0 / dS  # delta approximated as 1/dS at the nearest grid point.
+      
+      # -------------------------------------------------------------------------
+      # Build the spatial operator L such that dp/dt = L(p).
+      # We write the PDE in flux form. For mu > 0 (upwind):
+      #   flux_diff at i+1/2 = alpha_{i+1/2}*(p[i+1]-p[i]) / dS,
+      #   flux_drift at i+1/2 = mu * S_{i+1/2} * p[i],
+      # with alpha(S)=0.5*sigma(S)^2*S^2.
+      #
+      # The net flux is:
+      #   flux_{i+1/2} = (alpha_{i+1/2}*(p[i+1]-p[i]) / dS) - mu * S_{i+1/2} * p[i].
+      #
+      # Then the finite-difference operator is:
+      #   L(p)_i = (flux_{i+1/2} - flux_{i-1/2]) / dS,
+      # which we represent as a tridiagonal matrix.
+      # -------------------------------------------------------------------------
+      
+      # Compute alpha on the grid.
+      alpha = np.array([0.5 * (sigma_func(S_grid[i])**2) * (S_grid[i]**2) for i in range(NS + 1)])
+      # Compute midpoints alpha_{i+1/2} as simple averages.
+      alpha_half = np.array([0.5 * (alpha[i] + alpha[i+1]) for i in range(NS)])
+      
+      # Set up tridiagonal coefficients: L(p)_i = a[i]*p[i-1] + b[i]*p[i] + c[i]*p[i+1].
+      a = np.zeros(NS + 1)
+      b = np.zeros(NS + 1)
+      c = np.zeros(NS + 1)
+      
+      for i in range(1, NS):
+          # Midpoints in S.
+          S_half_right = 0.5 * (S_grid[i] + S_grid[i+1])
+          S_half_left  = 0.5 * (S_grid[i] + S_grid[i-1])
+          
+          # At the right interface i+1/2:
+          c_flux = alpha_half[i] / dS
+          b_flux = - (alpha_half[i] / dS + mu * S_half_right)
+          
+          # At the left interface i-1/2:
+          a_flux = - (alpha_half[i-1] / dS + mu * S_half_left)
+          b_flux2 = alpha_half[i-1] / dS
+          
+          # Combine: L(p)_i = (flux_{i+1/2} - flux_{i-1/2})/dS.
+          a[i] = -(a_flux) / dS      # multiplies p[i-1]
+          b[i] = (b_flux - b_flux2) / dS  # multiplies p[i]
+          c[i] = c_flux / dS         # multiplies p[i+1]
+      
+      # At the boundaries (i=0 and i=NS) we enforce Dirichlet: p=0.
+      
+      # -------------------------------------------------------------------------
+      # Build the Crank–Nicolson matrices:
+      #   M_minus = I - 0.5*dt*L  and  M_plus = I + 0.5*dt*L.
+      # Represent these as tridiagonal matrices with arrays for lower, diag, and upper.
+      # -------------------------------------------------------------------------
+      L_lower_m = np.zeros(NS + 1)
+      L_diag_m  = np.zeros(NS + 1)
+      L_upper_m = np.zeros(NS + 1)
+      
+      L_lower_p = np.zeros(NS + 1)
+      L_diag_p  = np.zeros(NS + 1)
+      L_upper_p = np.zeros(NS + 1)
+      
+      for i in range(NS + 1):
+          if i == 0 or i == NS:
+              L_diag_m[i] = 1.0
+              L_diag_p[i] = 1.0
+          else:
+              L_diag_m[i] = 1.0 - 0.5 * dt * b[i]
+              L_lower_m[i] = -0.5 * dt * a[i]
+              L_upper_m[i] = -0.5 * dt * c[i]
+              
+              L_diag_p[i] = 1.0 + 0.5 * dt * b[i]
+              L_lower_p[i] =  0.5 * dt * a[i]
+              L_upper_p[i] =  0.5 * dt * c[i]
+      
+      # -------------------------------------------------------------------------
+      # Define a tridiagonal solver that does not modify the original coefficients.
+      # -------------------------------------------------------------------------
+      def solve_tridiagonal(lsub, diag, lsup, rhs):
+          n = len(rhs)
+          diag_copy = diag.copy()
+          rhs_copy = rhs.copy()
+          for i in range(1, n):
+              m = lsub[i] / diag_copy[i - 1]
+              diag_copy[i] -= m * lsup[i - 1]
+              rhs_copy[i] -= m * rhs_copy[i - 1]
+          x = np.zeros(n)
+          x[-1] = rhs_copy[-1] / diag_copy[-1]
+          for i in range(n - 2, -1, -1):
+              x[i] = (rhs_copy[i] - lsup[i] * x[i + 1]) / diag_copy[i]
+          return x
+      
+      # -------------------------------------------------------------------------
+      # Time stepping: Crank–Nicolson scheme.
+      # -------------------------------------------------------------------------
+      for _ in range(NT):
+          # Build right-hand side vector: rhs = M_plus * p_now.
+          rhs = np.zeros(NS + 1)
+          for i in range(NS + 1):
+              if i == 0 or i == NS:
+                  rhs[i] = L_diag_p[i] * p_now[i]
+              else:
+                  rhs[i] = (L_lower_p[i] * p_now[i - 1] +
+                            L_diag_p[i]  * p_now[i] +
+                            L_upper_p[i] * p_now[i + 1])
+          # Solve for p_next from: M_minus * p_next = rhs.
+          p_next = solve_tridiagonal(L_lower_m, L_diag_m, L_upper_m, rhs)
+          # Correct for any small negative values.
+          p_next[p_next < 0] = 0.0
+          p_now = p_next.copy()
+          # (Optionally, re-normalize to conserve mass.)
+      
+      return pd.Series(index=S_grid, data=p_now)
 
-
+# TODO: Double check if works
 class Black_Scholes(Forward_Method):
   @staticmethod
-  def get_options_prices(S, K, r, T, sigma):
-    return Black_Scholes.try_1(S, K, r, T, sigma)
+  def get_option_price(S0: float, K: float, r: float, d: float, T: float, sigma: float | pd.Series) -> float:
+     return Black_Scholes.try_1(S0, K, r, T, sigma)
 
   @staticmethod
-  def try_1(S, K, r, T, sigma):
+  def try_1(S0, K, r, T, sigma):
     """
     Black-Scholes formula for a European call option.
     """
-    d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma*np.sqrt(T))
+    d1 = (np.log(S0/K) + (r + 0.5*sigma**2)*T) / (sigma*np.sqrt(T))
     d2 = d1 - sigma*np.sqrt(T)
-    call = S * norm.cdf(d1) - K*np.exp(-r*T)*norm.cdf(d2)
+    call = S0 * norm.cdf(d1) - K*np.exp(-r*T)*norm.cdf(d2)
     return call
+  
+  def fokker_plank():
+    return super.fokker_plank()
 
+# TODO: Fix (idk if it works)
 class Local_Black_Scholes(Forward_Method):
-  @staticmethod
-  def get_option_prices(S0, T, r, sigma_func, strike_range=[0,301],):
-    return Local_Black_Scholes.bs_loop(S0, T, r, sigma_func, strike_range,)
+  def get_option_price(S0, K, r, d, T, sigma):
+     return Local_Black_Scholes.claude_bs(S0, K, r, T, sigma)
 
   ###### Claude's attempt: #######
   @staticmethod
   def bs_loop(S0, T, r, local_vol, strike_range=[0,301], option_type='call', num_S_steps=100, num_t_steps=100):
     result = []
     for K in range(strike_range[0], strike_range[1]):
-      result.append(Local_Black_Scholes.black_scholes_local_vol(S0, K, T, r, local_vol, option_type, num_S_steps, num_t_steps))
+      result.append(Local_Black_Scholes.claude_bs(S0, K, T, r, local_vol, option_type, num_S_steps, num_t_steps))
     return result
         
   @staticmethod
-  def black_scholes_local_vol(S0, K, r, T, local_vol, option_type='call', 
+  def claude_bs(S0, K, r, T, local_vol, option_type='call', 
                            num_S_steps=100, num_t_steps=100):
     """
     Black-Scholes with price-dependent volatility using finite difference method
@@ -265,7 +448,7 @@ class Local_Black_Scholes(Forward_Method):
   def deepseek_algo(S0, T, r, sigma_func, strike_range=[0,301],):
     result = []
     for K in range(strike_range[0], strike_range[1]):
-      result.append(Local_Black_Scholes.black_scholes_price_dependent_vol(S0, K, T, r, sigma_func,))
+      result.append(Local_Black_Scholes.deepseek_bs(S0, K, T, r, sigma_func,))
     return result
 
   def thomas_algorithm(a, b, c, d):
@@ -302,7 +485,7 @@ class Local_Black_Scholes(Forward_Method):
     
     return x
 
-  def black_scholes_price_dependent_vol(S0, K, T, r, sigma_func, Ns=200, Nt=1000, Smax=None, option_type='call'):
+  def deepseek_bs(S0, K, T, r, sigma_func, Ns=200, Nt=1000, Smax=None, option_type='call'):
       if Smax is None:
           Smax = 2 * K
       Smin = 0
@@ -363,21 +546,36 @@ class Local_Black_Scholes(Forward_Method):
       option_price = interp1d(S_grid, V, kind='linear')(S0)
       return option_price
 
+# TODO: Impliment
 class Heston(Forward_Method):
-  def get_option_prices():
-    pass
+  def get_option_price(S0, K, r, d, T, sigma):
+     return super().get_option_price(K, r, d, T, sigma)
 
-class Backward_Methods(ABC):
+
+#--------------------------------------------------#
+'''
+(option prices ---> rnd)
+Backward Methods:
+
+  get_density(
+    - option_prices: prices of options at different strikes (pd.Series)
+  )
+'''
+class Backward_Method(ABC):
   @abstractmethod
-  def get_density(strikes, prices):
+  def get_density(option_prices: pd.Series) -> pd.Series:
     pass
 
-class Isakov(Backward_Methods):
-  def get_density(strikes, prices, time_to_expiry, R, D,):
-    pass
+# TODO: Impliment
+class Isakov(Backward_Method):
+  def get_density(option_prices):
+     return super().get_density()
 
-class Butterfly(Backward_Methods):
-  def get_density(strikes, prices, time_to_expiry, R, D,):
+class Butterfly(Backward_Method):
+  def get_density(option_prices: pd.Series, time_to_expiry, R, D,) -> pd.Series:
+    option_prices = option_prices.sort_index()
+    strikes = list(option_prices.index)
+    prices = list(option_prices.values)
     butterfly_prices = {}
     for i in range(1,len(strikes)-1):
       # Get components of the butterfly spread
@@ -390,17 +588,24 @@ class Butterfly(Backward_Methods):
 
         butterfly_price = left + right - (2 * middle)
         butterfly_prices[strike] = butterfly_price
-    # TODO: Set a standardized return thing: dictionary, pandas df?
-    return butterfly_prices
+    # TODO: Set to a pd.Series?
+    return pd.Series(butterfly_prices)
   
-  def butterfly_2(strikes, prices):
+  def butterfly_2(option_prices: pd.Series) -> pd.Series:
+    option_prices = option_prices.sort_index()
+    strikes = list(option_prices.index)
+    prices = list(option_prices.values)
     butterfly_prices = {}
     for i in range(1, len(strikes) - 1):
         butterfly_prices[strikes[i]] = prices[i - 1] + prices[i + 1] - (2 * prices[i])
     return butterfly_prices
-    
-class Breeden_Litzenberger(Backward_Methods):
-  def get_density(strikes, prices, time_to_expiry, R, D=0,):
+
+# TODO: Fix output to pd.Series   
+class Breeden_Litzenberger(Backward_Method):
+  def get_density(option_prices: pd.Series, time_to_expiry, R, D=0,) -> pd.Series:
+    option_prices = option_prices.sort_index()
+    strikes = list(option_prices.index)
+    prices = list(option_prices.values)
     tau = time_to_expiry     # Time to maturity (years)
     r = R - D                # Annual risk-free rate - the dividend yeild
 
@@ -416,16 +621,20 @@ class Breeden_Litzenberger(Backward_Methods):
     # TODO: Set a standardized return thing: dictionary, pandas df?
     return prices
   
-  def try_2(strikes, prices, time_to_expiry, R, D=0,):
+  def try_2(option_prices: pd.Series, time_to_expiry, R, D=0,) -> pd.Series:
     """
     Compute risk-neutral density using the second derivative of option prices
     according to Breeden-Litzenberger formula.
     """
+    option_prices = option_prices.sort_index()
+    strikes = list(option_prices.index)
+    prices = list(option_prices.values)
     T = time_to_expiry     # Time to maturity (years)
     r = R - D                # Annual risk-free rate - the dividend yeild
     d2C_dK2 = np.gradient(np.gradient(prices, strikes), strikes)
     return np.exp(r * T) * d2C_dK2
 
-class Implied_Vol(Backward_Methods):
+# TODO: Impliment
+class Implied_Vol(Backward_Method):
   def get_density(strikes, prices, time_to_expiry, R, D,):
     return super().get_density(prices)
